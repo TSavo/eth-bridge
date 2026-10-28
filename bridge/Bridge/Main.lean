@@ -639,6 +639,75 @@ theorem size_le_visitedSpace (P : Computation.PrimitiveMachine) (x : List Bool) 
 
 /-! ## 5. Assembly. -/
 
+/-- Appending one step at the end of a trace. -/
+theorem Trace.snoc {α : Type} {step : α → Option α} {n : ℕ} {a b c : α}
+    (h : Computation.Trace step n a b) (hs : step b = some c) : Computation.Trace step (n + 1) a c := by
+  induction h with
+  | refl a => exact Computation.Trace.cons hs (Computation.Trace.refl _)
+  | cons hab _ ih => exact Computation.Trace.cons hab (ih hs)
+
+/-- A located run of OpenAI's machine whose visited space stays below `V` is a `Reaches` of the stepped
+machine with states of size at most `8 (V + tapeCount + stateCount + 1)`, by the invariant. -/
+theorem reaches_of_trace (P : Computation.PrimitiveMachine) (pre : List Bool → List Bool) (x : List Bool)
+    (V : ℕ) (b : Bool) (final : SqrtLogSpace.LocatedCfg P) (hfin : final.config.state = .inl b)
+    (hV : ∀ (m : ℕ) (c : SqrtLogSpace.LocatedCfg P),
+      Computation.Trace (SqrtLogSpace.locatedStep P) m (SqrtLogSpace.locatedInit P (pre x)) c →
+        SqrtLogSpace.visitedSpace c ≤ V) :
+    ∀ (k : ℕ) (a : SqrtLogSpace.LocatedCfg P), Computation.Trace (SqrtLogSpace.locatedStep P) k a final →
+      ∀ (j : ℕ) (r : CfgRep), Rel P r a →
+      Computation.Trace (SqrtLogSpace.locatedStep P) j (SqrtLogSpace.locatedInit P (pre x)) a →
+      (stepped P pre).Reaches (8 * (V + P.tapeCount + P.stateCount + 1)) b r k := by
+  intro k a hk
+  induction hk with
+  | refl a =>
+    intro j r hrel hj
+    have hsz := size_of_rel P r a hrel
+    have hvis := hV j a hj
+    have hsz' : size r ≤ 8 * (V + P.tapeCount + P.stateCount + 1) := hsz.trans (by omega)
+    refine Stepped.Reaches.halt ?_ hsz'
+    obtain ⟨st, tapes⟩ := r
+    obtain ⟨-, -, hst⟩ := toCfg_eq_some P st tapes a.config hrel.1
+    rcases hst with ⟨b', rfl, hb'⟩ | ⟨q, hq, rfl, hq'⟩
+    · rw [hfin] at hb'
+      simp only [Sum.inl.injEq] at hb'
+      subst hb'
+      rfl
+    · rw [hfin] at hq'
+      exact absurd hq' (by simp)
+  | @cons n a a' c hab htail ih =>
+    intro j r hrel hj
+    have hsz := size_of_rel P r a hrel
+    have hvis := hV j a hj
+    have hsz' : size r ≤ 8 * (V + P.tapeCount + P.stateCount + 1) := hsz.trans (by omega)
+    refine Stepped.Reaches.step ?_ hsz' ?_
+    · obtain ⟨st, tapes⟩ := r
+      obtain ⟨-, -, hst⟩ := toCfg_eq_some P st tapes a.config hrel.1
+      rcases hst with ⟨b', rfl, hb'⟩ | ⟨q, hq, rfl, hq'⟩
+      · exfalso
+        unfold SqrtLogSpace.locatedStep at hab
+        simp [Computation.PrimitiveMachine.step, hb'] at hab
+      · rfl
+    · exact ih hfin (j + 1) (stepRep P r) (rel_step P r a a' hrel hab) (Trace.snoc hj hab)
+
+/-- Every polynomial-plus-constant is below `(n + 2)^d` for some `d`. -/
+theorem exists_pow_bound (c K : ℕ) : ∃ d : ℕ, ∀ n : ℕ, c * (n + 1) ^ c + K ≤ (n + 2) ^ d := by
+  refine ⟨c + (c + K), fun n => ?_⟩
+  have h1 : c * (n + 1) ^ c + K ≤ (c + K) * (n + 2) ^ c := by
+    have : (n + 1) ^ c ≤ (n + 2) ^ c := Nat.pow_le_pow_left (by omega) c
+    have : 1 ≤ (n + 2) ^ c := Nat.one_le_pow _ _ (by omega)
+    nlinarith
+  have h2 : c + K ≤ (n + 2) ^ (c + K) :=
+    (Nat.lt_two_pow_self).le.trans (Nat.pow_le_pow_left (by omega) _)
+  calc c * (n + 1) ^ c + K ≤ (c + K) * (n + 2) ^ c := h1
+    _ ≤ (n + 2) ^ (c + K) * (n + 2) ^ c := Nat.mul_le_mul_right _ h2
+    _ = (n + 2) ^ (c + (c + K)) := by ring
+
+/-- Polynomial times `2^{A·ρ(n)}` is below `A'·2^{δ n}` for some constant `A'`, for every δ > 0. -/
+theorem exists_const_exp_bound (c : ℕ) (A δ : ℝ) (hA : 0 < A) (hδ : 0 < δ) :
+    ∃ A' : ℕ, ∀ n : ℕ, (c : ℝ) * ((n : ℝ) + 1) ^ c * (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n) ≤
+      (A' : ℝ) * (2 : ℝ) ^ (δ * n) := by
+  sorry
+
 /-- From `ClaimAt 3`: one FinTM2 decides 3-SAT within A·2^{δn} steps for every δ > 0. -/
 theorem subexpTM_of_claimAt3 (h : SqrtLogSpace.ClaimAt 3) : Sat3.SubexpTM := by
   sorry
