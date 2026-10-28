@@ -27,3 +27,6 @@ globs = ["Bridge.+"]
 ```
 to its `lakefile.toml`, then `lake exe cache get && lake build Bridge`. On WSL2 set `UV_USE_IO_URING=0`.
 `instrument.sh <build log>` prints R, the number of declarations still using `sorry` (0).
+
+## Comparator
+`comparator_bridge.json` + `bridge/BridgeChallenge.lean`: Anthropic's CI script (`.github/scripts/comparator-check.sh`) accepted the bridge on 2026-10-27: statement identical to the trusted challenge, standard axioms only, replayed by both the Lean kernel and nanoda ("Your solution is okay!").
