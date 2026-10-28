@@ -650,19 +650,20 @@ theorem Trace.snoc {α : Type} {step : α → Option α} {n : ℕ} {a b c : α}
 machine with states of size at most `8 (V + tapeCount + stateCount + 1)`, by the invariant. -/
 theorem reaches_of_trace (P : Computation.PrimitiveMachine) (pre : List Bool → List Bool) (x : List Bool)
     (V : ℕ) (b : Bool) (final : SqrtLogSpace.LocatedCfg P) (hfin : final.config.state = .inl b)
-    (hV : ∀ (m : ℕ) (c : SqrtLogSpace.LocatedCfg P),
+    (T : ℕ)
+    (hV : ∀ (m : ℕ), m ≤ T → ∀ (c : SqrtLogSpace.LocatedCfg P),
       Computation.Trace (SqrtLogSpace.locatedStep P) m (SqrtLogSpace.locatedInit P (pre x)) c →
         SqrtLogSpace.visitedSpace c ≤ V) :
     ∀ (k : ℕ) (a : SqrtLogSpace.LocatedCfg P), Computation.Trace (SqrtLogSpace.locatedStep P) k a final →
-      ∀ (j : ℕ) (r : CfgRep), Rel P r a →
+      ∀ (j : ℕ) (r : CfgRep), j + k ≤ T → Rel P r a →
       Computation.Trace (SqrtLogSpace.locatedStep P) j (SqrtLogSpace.locatedInit P (pre x)) a →
       (stepped P pre).Reaches (8 * (V + P.tapeCount + P.stateCount + 1)) b r k := by
   intro k a hk
   induction hk with
   | refl a =>
-    intro j r hrel hj
+    intro j r hjk hrel hj
     have hsz := size_of_rel P r a hrel
-    have hvis := hV j a hj
+    have hvis := hV j (by omega) a hj
     have hsz' : size r ≤ 8 * (V + P.tapeCount + P.stateCount + 1) := hsz.trans (by omega)
     refine Stepped.Reaches.halt ?_ hsz'
     obtain ⟨st, tapes⟩ := r
@@ -675,9 +676,9 @@ theorem reaches_of_trace (P : Computation.PrimitiveMachine) (pre : List Bool →
     · rw [hfin] at hq'
       exact absurd hq' (by simp)
   | @cons n a a' c hab htail ih =>
-    intro j r hrel hj
+    intro j r hjk hrel hj
     have hsz := size_of_rel P r a hrel
-    have hvis := hV j a hj
+    have hvis := hV j (by omega) a hj
     have hsz' : size r ≤ 8 * (V + P.tapeCount + P.stateCount + 1) := hsz.trans (by omega)
     refine Stepped.Reaches.step ?_ hsz' ?_
     · obtain ⟨st, tapes⟩ := r
@@ -687,7 +688,7 @@ theorem reaches_of_trace (P : Computation.PrimitiveMachine) (pre : List Bool →
         unfold SqrtLogSpace.locatedStep at hab
         simp [Computation.PrimitiveMachine.step, hb'] at hab
       · rfl
-    · exact ih hfin (j + 1) (stepRep P r) (rel_step P r a a' hrel hab) (Trace.snoc hj hab)
+    · exact ih hfin (j + 1) (stepRep P r) (by omega) (rel_step P r a a' hrel hab) (Trace.snoc hj hab)
 
 /-- Every polynomial-plus-constant is below `(n + 2)^d` for some `d`. -/
 theorem exists_pow_bound (c K : ℕ) : ∃ d : ℕ, ∀ n : ℕ, c * (n + 1) ^ c + K ≤ (n + 2) ^ d := by
@@ -706,11 +707,191 @@ theorem exists_pow_bound (c K : ℕ) : ∃ d : ℕ, ∀ n : ℕ, c * (n + 1) ^ c
 theorem exists_const_exp_bound (c : ℕ) (A δ : ℝ) (hA : 0 < A) (hδ : 0 < δ) :
     ∃ A' : ℕ, ∀ n : ℕ, (c : ℝ) * ((n : ℝ) + 1) ^ c * (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n) ≤
       (A' : ℝ) * (2 : ℝ) ^ (δ * n) := by
+  -- the polynomial factor is eventually below (2^{δ/2})^n
+  set r : ℝ := (2 : ℝ) ^ (δ / 2) with hr
+  have hr1 : 1 < r := Real.one_lt_rpow (by norm_num) (by positivity)
+  have hr0 : 0 < r := zero_lt_one.trans hr1
+  have hpoly : ∃ N1 : ℕ, ∀ n : ℕ, N1 ≤ n → ((n : ℝ) + 1) ^ c ≤ (2 : ℝ) ^ c * r ^ n := by
+    have hlo := isLittleO_pow_const_const_pow_of_one_lt (R := ℝ) c hr1
+    obtain ⟨N, hN⟩ := Filter.eventually_atTop.1 (hlo.bound (by norm_num : (0 : ℝ) < 1))
+    refine ⟨max N 1, fun n hn => ?_⟩
+    have h1 := hN n (le_of_max_le_left hn)
+    have hn1 : (1 : ℝ) ≤ n := by exact_mod_cast le_of_max_le_right hn
+    rw [Real.norm_of_nonneg (by positivity), Real.norm_of_nonneg (by positivity), one_mul] at h1
+    calc ((n : ℝ) + 1) ^ c ≤ (2 * n) ^ c := pow_le_pow_left₀ (by positivity) (by linarith) c
+      _ = 2 ^ c * (n : ℝ) ^ c := mul_pow _ _ _
+      _ ≤ 2 ^ c * r ^ n := mul_le_mul_of_nonneg_left h1 (by positivity)
+  obtain ⟨N1, hN1⟩ := hpoly
+  obtain ⟨N2, hN2⟩ := runtimeScale_sublinear (δ / (2 * A)) (by positivity)
+  -- constants covering the finitely many small n
+  set K1 : ℝ := ((N1 : ℝ) + 1) ^ c with hK1
+  set K2 : ℝ := ∑ m ∈ Finset.range N2, (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale m) with hK2
+  have hK2nn : 0 ≤ K2 := Finset.sum_nonneg fun _ _ => by positivity
+  have hpoly' : ∀ n : ℕ, ((n : ℝ) + 1) ^ c ≤ (2 ^ c + K1) * r ^ n := by
+    intro n
+    have hrn : 1 ≤ r ^ n := one_le_pow₀ hr1.le
+    rcases le_or_gt N1 n with hn | hn
+    · calc ((n : ℝ) + 1) ^ c ≤ 2 ^ c * r ^ n := hN1 n hn
+        _ ≤ (2 ^ c + K1) * r ^ n :=
+          mul_le_mul_of_nonneg_right (by linarith [show (0 : ℝ) ≤ K1 by positivity]) (by positivity)
+    · calc ((n : ℝ) + 1) ^ c ≤ K1 := by
+            rw [hK1]
+            have : (n : ℝ) ≤ N1 := by exact_mod_cast hn.le
+            exact pow_le_pow_left₀ (by positivity) (by linarith) c
+        _ ≤ (2 ^ c + K1) * r ^ n := by
+            have hK1nn : (0 : ℝ) ≤ K1 := by rw [hK1]; positivity
+            have h2c : (0 : ℝ) ≤ 2 ^ c := by positivity
+            calc K1 ≤ 2 ^ c + K1 := by linarith
+              _ = (2 ^ c + K1) * 1 := (mul_one _).symm
+              _ ≤ (2 ^ c + K1) * r ^ n := mul_le_mul_of_nonneg_left hrn (by linarith)
+  have hexp' : ∀ n : ℕ, (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n) ≤ (K2 + 1) * r ^ n := by
+    intro n
+    have hrn : 1 ≤ r ^ n := one_le_pow₀ hr1.le
+    have hrn' : r ^ n = (2 : ℝ) ^ (δ / 2 * n) := by
+      rw [hr, ← Real.rpow_natCast, ← Real.rpow_mul (by norm_num)]
+    rcases le_or_gt N2 n with hn | hn
+    · have := hN2 n hn
+      calc (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n) ≤ (2 : ℝ) ^ (δ / 2 * n) := by
+            apply Real.rpow_le_rpow_of_exponent_le (by norm_num)
+            calc A * SqrtLog.Statement.runtimeScale n ≤ A * (δ / (2 * A) * n) := by gcongr
+              _ = δ / 2 * n := by field_simp
+        _ = r ^ n := hrn'.symm
+        _ ≤ (K2 + 1) * r ^ n := by nlinarith
+    · calc (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n) ≤ K2 := by
+            rw [hK2]
+            exact Finset.single_le_sum (f := fun m => (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale m))
+              (fun _ _ => by positivity) (Finset.mem_range.2 hn)
+        _ ≤ (K2 + 1) * r ^ n := by nlinarith
+  refine ⟨⌈(c : ℝ) * (2 ^ c + K1) * (K2 + 1)⌉₊, fun n => ?_⟩
+  have hrr : r ^ n * r ^ n = (2 : ℝ) ^ (δ * n) := by
+    rw [hr, ← Real.rpow_natCast, ← Real.rpow_mul (by norm_num), ← Real.rpow_add (by norm_num)]
+    ring_nf
+  calc (c : ℝ) * ((n : ℝ) + 1) ^ c * (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n)
+      ≤ (c : ℝ) * ((2 ^ c + K1) * r ^ n) * ((K2 + 1) * r ^ n) := by
+        gcongr
+        · exact hpoly' n
+        · exact hexp' n
+    _ = (c : ℝ) * (2 ^ c + K1) * (K2 + 1) * (r ^ n * r ^ n) := by ring
+    _ = (c : ℝ) * (2 ^ c + K1) * (K2 + 1) * (2 : ℝ) ^ (δ * n) := by rw [hrr]
+    _ ≤ (⌈(c : ℝ) * (2 ^ c + K1) * (K2 + 1)⌉₊ : ℝ) * (2 : ℝ) ^ (δ * n) := by
+        gcongr
+        exact Nat.le_ceil _
+
+/-- A 3-CNF without repeated clauses has at most `(2n+1)^3` clauses: clauses of length ≤ 3 inject into
+triples of optional literals. -/
+theorem length_le_of_is3CNF {n : ℕ} (φ : Sat3.CNF n) (h : Sat3.Is3CNF φ) : φ.length ≤ (2 * n + 1) ^ 3 := by
+  let f : List (Sat3.Lit n) → Option (Sat3.Lit n) × Option (Sat3.Lit n) × Option (Sat3.Lit n) :=
+    fun C => (C[0]?, C[1]?, C[2]?)
+  have hinj : ∀ C ∈ φ, ∀ D ∈ φ, f C = f D → C = D := by
+    intro C hC D hD hfd
+    simp only [f, Prod.mk.injEq] at hfd
+    obtain ⟨h0, h1, h2⟩ := hfd
+    have hC3 := h.1 C hC
+    have hD3 := h.1 D hD
+    apply List.ext_getElem?
+    intro i
+    rcases i with _ | _ | _ | i
+    · exact h0
+    · exact h1
+    · exact h2
+    · rw [List.getElem?_eq_none (by omega), List.getElem?_eq_none (by omega)]
+  have hnd : (φ.map f).Nodup := h.2.map_on hinj
+  have hcard := hnd.length_le_card
+  rw [List.length_map] at hcard
+  refine hcard.trans (le_of_eq ?_)
+  simp only [Fintype.card_prod, Fintype.card_option, Fintype.card_fin, Fintype.card_bool]
+  ring
+
+/-- The plain code of a 3-CNF on `n` variables has length at most `100 (n+1)^4`. -/
+theorem enc_length_le {n : ℕ} (φ : Sat3.CNF n) (h : Sat3.Is3CNF φ) :
+    (Sat3.enc φ).length ≤ 100 * (n + 1) ^ 4 := by
+  have hm := length_le_of_is3CNF φ h
+  have hlog : Nat.log2 (2 * n) + 1 ≤ 2 * n + 1 := by
+    have := Nat.log2_le_self (2 * n)
+    omega
+  have hlen : (Sat3.enc φ).length = n + 1 + φ.length * (3 * (Nat.log2 (2 * n) + 1)) := by
+    simp only [Sat3.enc, List.length_append, List.length_replicate, List.length_cons,
+      List.length_flatMap, List.map_map, Function.comp_def, List.length_map, List.length_range,
+      List.map_const', List.sum_replicate, smul_eq_mul]
+    ring
+  rw [hlen]
+  have h2 : 2 * n + 1 ≤ 2 * (n + 1) := by omega
+  calc n + 1 + φ.length * (3 * (Nat.log2 (2 * n) + 1))
+      ≤ n + 1 + (2 * n + 1) ^ 3 * (3 * (2 * n + 1)) := by gcongr
+    _ ≤ (n + 1) + (2 * (n + 1)) ^ 3 * (3 * (2 * (n + 1))) := by gcongr
+    _ = (n + 1) + 48 * (n + 1) ^ 4 := by ring
+    _ ≤ 100 * (n + 1) ^ 4 := by
+        have : n + 1 ≤ (n + 1) ^ 4 := Nat.le_self_pow (by norm_num) _
+        omega
+
+theorem outputs_mono {N : TM2ComputableAux Bool Bool} {x : List (N.tm.Γ N.tm.k₀)}
+    {y : Option (List (N.tm.Γ N.tm.k₁))} {t t' : ℕ}
+    (h : Nonempty (TM2OutputsInTime N.tm x y t)) (ht : t ≤ t') : Nonempty (TM2OutputsInTime N.tm x y t') :=
+  h.elim fun e => ⟨{ e with steps_le_m := e.steps_le_m.trans ht }⟩
+
+/-- The state-size bound of a run, as a polynomial in the input length. -/
+theorem size_bound_nat (S : ℝ) (e cL n L xl tc sc : ℕ) (hL : L ≤ cL * (n + 1) ^ 5) (hxn : n + 1 ≤ xl) :
+    8 * (⌈S⌉₊ * (L + 1) ^ e + tc + sc + 1) ≤
+      (8 * ⌈S⌉₊ * (cL + 1) ^ e + 5 * e) * (xl + 1) ^ (8 * ⌈S⌉₊ * (cL + 1) ^ e + 5 * e) + 8 * (tc + sc + 1) := by
+  sorry
+
+/-- The step bound of the compiled machine, as `cT (n+1)^{cT} 2^{A ρ(n)}`. -/
+theorem time_bound_real (c' d cL : ℕ) (C A : ℝ) (hC : 0 < C) (hA : 0 < A) (n L xl time : ℕ)
+    (hL : L ≤ cL * (n + 1) ^ 5) (hx : xl ≤ 100 * (n + 1) ^ 4)
+    (htime : (time : ℝ) ≤ C * ((L : ℝ) + 1) ^ d * (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n)) :
+    ((c' * (time + 1) * (xl + 1) ^ c' : ℕ) : ℝ) ≤
+      ((⌈(c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c'⌉₊ + 5 * d + 4 * c' : ℕ) : ℝ) *
+        ((n : ℝ) + 1) ^ (⌈(c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c'⌉₊ + 5 * d + 4 * c') *
+        (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n) := by
   sorry
 
 /-- From `ClaimAt 3`: one FinTM2 decides 3-SAT within A·2^{δn} steps for every δ > 0. -/
 theorem subexpTM_of_claimAt3 (h : SqrtLogSpace.ClaimAt 3) : Sat3.SubexpTM := by
-  sorry
+  obtain ⟨P, countTape, answerTape, C, A, S, d, e, hC, hA, hS, hd, he, hrun⟩ := h
+  obtain ⟨pre, hpre, hspec⟩ := frontEnd_exists
+  obtain ⟨cL, hcL⟩ := formulaBitLength_poly 3
+  haveI hP : IsPolyT (stepped P pre) := isPolyT_stepped P pre hpre
+  obtain ⟨d', hd'⟩ := exists_pow_bound (8 * ⌈S⌉₊ * (cL + 1) ^ e + 5 * e) (8 * (P.tapeCount + P.stateCount + 1))
+  obtain ⟨N, c', hfin, hN⟩ := Groundwork.exists_tm (stepped P pre) d'
+  refine ⟨N, hfin, fun δ hδ => ?_⟩
+  obtain ⟨A', hA'⟩ := exists_const_exp_bound
+    (⌈(c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c'⌉₊ + 5 * d + 4 * c') A δ hA (by exact_mod_cast hδ)
+  refine ⟨A', fun n φ hφ => ?_⟩
+  have hw : SAT.WidthAtMost 3 (toFinsetCNF φ) := toFinsetCNF_width φ hφ
+  obtain ⟨time, final, htr, -, -, hstate, -, -, htime, hspace⟩ := hrun n (toFinsetCNF φ) hw
+  refine ⟨decide (0 < SAT.count (toFinsetCNF φ)), ?_, ?_⟩
+  · rw [decide_eq_true_iff]
+    exact (satisfiable_iff_count_pos φ).symm
+  · have hpre' := hspec n φ hφ
+    have hLle : Encoding.formulaBitLength (toFinsetCNF φ) ≤ cL * (n + 1) ^ 5 := hcL n (toFinsetCNF φ) hw
+    have hxn : n + 1 ≤ (Sat3.enc φ).length := by simp [Sat3.enc]
+    have hxle : (Sat3.enc φ).length ≤ 100 * (n + 1) ^ 4 := enc_length_le φ hφ
+    -- the visited space along the run, as a natural number
+    have hVle : ∀ (m : ℕ), m ≤ time → ∀ (c : SqrtLogSpace.LocatedCfg P),
+        Computation.Trace (SqrtLogSpace.locatedStep P) m (SqrtLogSpace.locatedInit P (pre (Sat3.enc φ))) c →
+        SqrtLogSpace.visitedSpace c ≤ ⌈S⌉₊ * (Encoding.formulaBitLength (toFinsetCNF φ) + 1) ^ e := by
+      intro m hm c htc
+      rw [hpre'] at htc
+      have h1 := hspace m c hm htc
+      have h2 : (SqrtLogSpace.visitedSpace c : ℝ) ≤
+          ((⌈S⌉₊ * (Encoding.formulaBitLength (toFinsetCNF φ) + 1) ^ e : ℕ) : ℝ) := by
+        push_cast
+        exact h1.trans (by gcongr; exact Nat.le_ceil S)
+      exact_mod_cast h2
+    have htr' : Computation.Trace (SqrtLogSpace.locatedStep P) time
+        (SqrtLogSpace.locatedInit P (pre (Sat3.enc φ))) final := by rw [hpre']; exact htr
+    have hruns : (stepped P pre).Runs (Sat3.enc φ) time
+        (8 * (⌈S⌉₊ * (Encoding.formulaBitLength (toFinsetCNF φ) + 1) ^ e + P.tapeCount + P.stateCount + 1))
+        (decide (0 < SAT.count (toFinsetCNF φ))) :=
+      reaches_of_trace P pre (Sat3.enc φ) _ _ final hstate time hVle time _ htr' 0 _ (by omega)
+        (rel_init P _) (Computation.Trace.refl _)
+    have hsize := size_bound_nat S e cL n _ (Sat3.enc φ).length P.tapeCount P.stateCount hLle hxn
+    have hout := hN (Sat3.enc φ) time _ _ hruns ((hsize.trans (hd' _)).trans (le_of_eq rfl))
+    refine outputs_mono hout ?_
+    -- the step bound is below A'·2^{δ n}
+    apply Nat.le_floor
+    have hreal := time_bound_real c' d cL C A hC hA n _ (Sat3.enc φ).length time hLle hxle htime
+    exact hreal.trans (hA' n)
 
 /-- **The bridge.** OpenAI's claim implies Anthropic's `ETHIsFalse`. -/
 theorem ethIsFalse_of_claim (h : SqrtLogSpace.Claim) : MainResults.ETHIsFalse :=
