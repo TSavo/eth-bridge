@@ -833,7 +833,23 @@ theorem outputs_mono {N : TM2ComputableAux Bool Bool} {x : List (N.tm.Γ N.tm.k�
 theorem size_bound_nat (S : ℝ) (e cL n L xl tc sc : ℕ) (hL : L ≤ cL * (n + 1) ^ 5) (hxn : n + 1 ≤ xl) :
     8 * (⌈S⌉₊ * (L + 1) ^ e + tc + sc + 1) ≤
       (8 * ⌈S⌉₊ * (cL + 1) ^ e + 5 * e) * (xl + 1) ^ (8 * ⌈S⌉₊ * (cL + 1) ^ e + 5 * e) + 8 * (tc + sc + 1) := by
-  sorry
+  set a := ⌈S⌉₊ with ha
+  have h1 : L + 1 ≤ (cL + 1) * (xl + 1) ^ 5 := by
+    have h5 : 1 ≤ (n + 1) ^ 5 := Nat.one_le_pow _ _ (by omega)
+    have h6 : (n + 1) ^ 5 ≤ (xl + 1) ^ 5 := Nat.pow_le_pow_left (by omega) 5
+    nlinarith
+  have h2 : (L + 1) ^ e ≤ (cL + 1) ^ e * (xl + 1) ^ (5 * e) := by
+    calc (L + 1) ^ e ≤ ((cL + 1) * (xl + 1) ^ 5) ^ e := Nat.pow_le_pow_left h1 e
+      _ = (cL + 1) ^ e * (xl + 1) ^ (5 * e) := by rw [mul_pow, ← pow_mul]
+  have h3 : (xl + 1) ^ (5 * e) ≤ (xl + 1) ^ (8 * a * (cL + 1) ^ e + 5 * e) :=
+    Nat.pow_le_pow_right (by omega) (by omega)
+  have h4 : 8 * a * (L + 1) ^ e ≤
+      (8 * a * (cL + 1) ^ e + 5 * e) * (xl + 1) ^ (8 * a * (cL + 1) ^ e + 5 * e) := by
+    calc 8 * a * (L + 1) ^ e ≤ 8 * a * ((cL + 1) ^ e * (xl + 1) ^ (5 * e)) := Nat.mul_le_mul_left _ h2
+      _ = (8 * a * (cL + 1) ^ e) * (xl + 1) ^ (5 * e) := by ring
+      _ ≤ (8 * a * (cL + 1) ^ e + 5 * e) * (xl + 1) ^ (8 * a * (cL + 1) ^ e + 5 * e) :=
+          Nat.mul_le_mul (by omega) h3
+  nlinarith [h4]
 
 /-- The step bound of the compiled machine, as `cT (n+1)^{cT} 2^{A ρ(n)}`. -/
 theorem time_bound_real (c' d cL : ℕ) (C A : ℝ) (hC : 0 < C) (hA : 0 < A) (n L xl time : ℕ)
@@ -843,7 +859,50 @@ theorem time_bound_real (c' d cL : ℕ) (C A : ℝ) (hC : 0 < C) (hA : 0 < A) (n
       ((⌈(c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c'⌉₊ + 5 * d + 4 * c' : ℕ) : ℝ) *
         ((n : ℝ) + 1) ^ (⌈(c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c'⌉₊ + 5 * d + 4 * c') *
         (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n) := by
-  sorry
+  set cT : ℕ := ⌈(c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c'⌉₊ + 5 * d + 4 * c' with hcT
+  set E : ℝ := (2 : ℝ) ^ (A * SqrtLog.Statement.runtimeScale n) with hE
+  have hρ : 0 ≤ SqrtLog.Statement.runtimeScale n := by
+    unfold SqrtLog.Statement.runtimeScale; positivity
+  have hE1 : 1 ≤ E := Real.one_le_rpow (by norm_num) (by positivity)
+  have hE0 : 0 ≤ E := zero_le_one.trans hE1
+  have hn1 : (1 : ℝ) ≤ (n : ℝ) + 1 := by linarith [show (0 : ℝ) ≤ n from Nat.cast_nonneg n]
+  have hL1 : ((L : ℝ) + 1) ≤ ((cL : ℝ) + 1) * ((n : ℝ) + 1) ^ 5 := by
+    have h5 : (1 : ℝ) ≤ ((n : ℝ) + 1) ^ 5 := one_le_pow₀ hn1
+    have hL' : (L : ℝ) ≤ (cL : ℝ) * ((n : ℝ) + 1) ^ 5 := by exact_mod_cast hL
+    nlinarith
+  have hx1 : ((xl : ℝ) + 1) ≤ 101 * ((n : ℝ) + 1) ^ 4 := by
+    have h4 : (1 : ℝ) ≤ ((n : ℝ) + 1) ^ 4 := one_le_pow₀ hn1
+    have hx' : (xl : ℝ) ≤ 100 * ((n : ℝ) + 1) ^ 4 := by exact_mod_cast hx
+    nlinarith
+  have hCL : (0 : ℝ) ≤ C * ((cL : ℝ) + 1) ^ d + 1 := by positivity
+  -- time + 1 ≤ (C (cL+1)^d + 1) (n+1)^{5d} E
+  have ht1 : ((time : ℝ) + 1) ≤ (C * ((cL : ℝ) + 1) ^ d + 1) * ((n : ℝ) + 1) ^ (5 * d) * E := by
+    have hLd : ((L : ℝ) + 1) ^ d ≤ ((cL : ℝ) + 1) ^ d * ((n : ℝ) + 1) ^ (5 * d) := by
+      calc ((L : ℝ) + 1) ^ d ≤ (((cL : ℝ) + 1) * ((n : ℝ) + 1) ^ 5) ^ d :=
+            pow_le_pow_left₀ (by positivity) hL1 d
+        _ = ((cL : ℝ) + 1) ^ d * ((n : ℝ) + 1) ^ (5 * d) := by rw [mul_pow, ← pow_mul]
+    have hn5 : (1 : ℝ) ≤ ((n : ℝ) + 1) ^ (5 * d) := one_le_pow₀ hn1
+    calc ((time : ℝ) + 1) ≤ C * ((L : ℝ) + 1) ^ d * E + 1 := by linarith
+      _ ≤ C * (((cL : ℝ) + 1) ^ d * ((n : ℝ) + 1) ^ (5 * d)) * E + 1 := by gcongr
+      _ ≤ C * (((cL : ℝ) + 1) ^ d * ((n : ℝ) + 1) ^ (5 * d)) * E + ((n : ℝ) + 1) ^ (5 * d) * E := by
+          nlinarith
+      _ = (C * ((cL : ℝ) + 1) ^ d + 1) * ((n : ℝ) + 1) ^ (5 * d) * E := by ring
+  have hxc : ((xl : ℝ) + 1) ^ c' ≤ 101 ^ c' * ((n : ℝ) + 1) ^ (4 * c') := by
+    calc ((xl : ℝ) + 1) ^ c' ≤ (101 * ((n : ℝ) + 1) ^ 4) ^ c' := pow_le_pow_left₀ (by positivity) hx1 c'
+      _ = 101 ^ c' * ((n : ℝ) + 1) ^ (4 * c') := by rw [mul_pow, ← pow_mul]
+  have hcoef : (c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c' ≤ (cT : ℝ) := by
+    rw [hcT]; push_cast
+    linarith [Nat.le_ceil ((c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c'),
+      show (0 : ℝ) ≤ 5 * d + 4 * c' by positivity]
+  have hpow : ((n : ℝ) + 1) ^ (5 * d + 4 * c') ≤ ((n : ℝ) + 1) ^ cT :=
+    pow_le_pow_right₀ hn1 (by rw [hcT]; omega)
+  push_cast
+  calc (c' : ℝ) * ((time : ℝ) + 1) * ((xl : ℝ) + 1) ^ c'
+      ≤ (c' : ℝ) * ((C * ((cL : ℝ) + 1) ^ d + 1) * ((n : ℝ) + 1) ^ (5 * d) * E) *
+          (101 ^ c' * ((n : ℝ) + 1) ^ (4 * c')) := by gcongr
+    _ = ((c' : ℝ) * (C * ((cL : ℝ) + 1) ^ d + 1) * (101 : ℝ) ^ c') * ((n : ℝ) + 1) ^ (5 * d + 4 * c') * E := by
+        rw [pow_add]; ring
+    _ ≤ (cT : ℝ) * ((n : ℝ) + 1) ^ cT * E := by gcongr
 
 /-- From `ClaimAt 3`: one FinTM2 decides 3-SAT within A·2^{δn} steps for every δ > 0. -/
 theorem subexpTM_of_claimAt3 (h : SqrtLogSpace.ClaimAt 3) : Sat3.SubexpTM := by
