@@ -421,6 +421,52 @@ theorem stepRep_length (P : Computation.PrimitiveMachine) (r : CfgRep) (c : P.Cf
     | inl _ => rfl
     | inr p => simp only [Sum.elim_inr, setAt_eq_set _ _ _ hscan, List.length_set]
 
+/-- Span bookkeeping for one head move or write, with OpenAI's `min`/`max` tracking of the visited
+interval. -/
+theorem span_moveL (t : TapeRep) (pos lo up : ℤ)
+    (h1 : (t.1.length : ℤ) = pos - lo) (h2 : (t.2.2.length : ℤ) = up - pos) :
+    ((moveL t).1.length : ℤ) = pos + -1 - min lo (pos + -1) ∧
+    ((moveL t).2.2.length : ℤ) = max up (pos + -1) - (pos + -1) := by
+  obtain ⟨L, h, R⟩ := t
+  simp only at h1 h2
+  rcases L with _ | ⟨a, L'⟩
+  · simp only [List.length_nil, Nat.cast_zero] at h1
+    simp only [moveL, List.tail_nil, List.length_nil, List.length_cons, Nat.cast_zero, Nat.cast_add,
+      Nat.cast_one]
+    rw [min_eq_right (by omega), max_eq_left (by omega)]
+    constructor <;> omega
+  · simp only [List.length_cons, Nat.cast_add, Nat.cast_one] at h1
+    simp only [moveL, List.tail_cons, List.length_cons, Nat.cast_add, Nat.cast_one]
+    rw [min_eq_left (by omega), max_eq_left (by omega)]
+    constructor <;> omega
+
+theorem span_moveR (t : TapeRep) (pos lo up : ℤ)
+    (h1 : (t.1.length : ℤ) = pos - lo) (h2 : (t.2.2.length : ℤ) = up - pos) :
+    ((moveR t).1.length : ℤ) = pos + 1 - min lo (pos + 1) ∧
+    ((moveR t).2.2.length : ℤ) = max up (pos + 1) - (pos + 1) := by
+  obtain ⟨L, h, R⟩ := t
+  simp only at h1 h2
+  rcases R with _ | ⟨a, R'⟩
+  · simp only [List.length_nil, Nat.cast_zero] at h2
+    simp only [moveR, List.tail_nil, List.length_nil, List.length_cons, Nat.cast_zero, Nat.cast_add,
+      Nat.cast_one]
+    rw [min_eq_left (by omega), max_eq_right (by omega)]
+    constructor <;> omega
+  · simp only [List.length_cons, Nat.cast_add, Nat.cast_one] at h2
+    simp only [moveR, List.tail_cons, List.length_cons, Nat.cast_add, Nat.cast_one]
+    rw [min_eq_left (by omega), max_eq_left (by omega)]
+    constructor <;> omega
+
+theorem span_write (b : Option Bool) (t : TapeRep) (pos lo up : ℤ)
+    (h1 : (t.1.length : ℤ) = pos - lo) (h2 : (t.2.2.length : ℤ) = up - pos) :
+    ((writeC b t).1.length : ℤ) = pos + 0 - min lo (pos + 0) ∧
+    ((writeC b t).2.2.length : ℤ) = max up (pos + 0) - (pos + 0) := by
+  obtain ⟨L, h, R⟩ := t
+  simp only at h1 h2
+  simp only [writeC, add_zero]
+  rw [min_eq_left (by omega), max_eq_left (by omega)]
+  exact ⟨h1, h2⟩
+
 theorem rel_step (P : Computation.PrimitiveMachine) (r : CfgRep) (lc lc' : SqrtLogSpace.LocatedCfg P)
     (h : Rel P r lc) (hs : SqrtLogSpace.locatedStep P lc = some lc') : Rel P (stepRep P r) lc' := by
   obtain ⟨hcfg, hlen, hrel⟩ := h
@@ -430,7 +476,52 @@ theorem rel_step (P : Computation.PrimitiveMachine) (r : CfgRep) (lc lc' : SqrtL
   · rw [stepRep_sound P r lc.config hcfg, hstep, monitor_config]
     rfl
   · rw [stepRep_length P r lc.config hcfg, hlen]
-  · sorry
+  · obtain ⟨st, tapes⟩ := r
+    obtain ⟨hlen', htapes, hst⟩ := toCfg_eq_some P st tapes lc.config hcfg
+    rcases hst with ⟨b, rfl, hb⟩ | ⟨q, hq, rfl, hq'⟩
+    · exfalso
+      simp [Computation.PrimitiveMachine.step, hb] at hstep
+    · have hscan : (P.scan ⟨q, hq⟩).val < tapes.length := by rw [hlen]; exact (P.scan ⟨q, hq⟩).isLt
+      simp only [Computation.PrimitiveMachine.step, hq', htapes, toTape_head] at hstep
+      simp only [SqrtLogSpace.LocatedCfg.monitor, hq', Sum.elim_inr, htapes, toTape_head]
+      simp only [stepRep, Sum.elim_inr, scanTable_getD P ⟨q, hq⟩,
+        List.getD_eq_getElem (l := tapes) (d := (([], none, []) : TapeRep)) hscan]
+      have ht := table_getD P ⟨q, hq⟩ (tapes[(P.scan ⟨q, hq⟩).val]'hscan).2.1
+      simp only [ht]
+      obtain ⟨tr, htr⟩ : ∃ tr, P.transition ⟨q, hq⟩ (tapes[(P.scan ⟨q, hq⟩).val]'hscan).2.1 = tr := ⟨_, rfl⟩
+      simp only [htr] at hstep ⊢
+      cases tr with
+      | inl ans =>
+        simp only [Option.some.injEq] at hstep
+        subst hstep
+        simp only [transOf, Sum.elim_inl]
+        intro i hi
+        exact hrel i hi
+      | inr qa =>
+        obtain ⟨q', act⟩ := qa
+        simp only [Option.some.injEq] at hstep
+        subst hstep
+        simp only [transOf, Sum.elim_inr]
+        intro i hi
+        simp only [setAt_eq_set _ _ _ hscan] at hi ⊢
+        by_cases hij : i = P.scan ⟨q, hq⟩
+        · subst hij
+          simp only [List.getElem_set_self, Function.update_self]
+          obtain ⟨h1, h2⟩ := hrel (P.scan ⟨q, hq⟩) hscan
+          simp only at h1 h2
+          cases act with
+          | move d =>
+            cases d
+            · simp only [actOf, applyAct, Sum.elim_inl, cond_false, SqrtLogSpace.headDisplacement]
+              exact span_moveL _ _ _ _ h1 h2
+            · simp only [actOf, applyAct, Sum.elim_inl, cond_true, SqrtLogSpace.headDisplacement]
+              exact span_moveR _ _ _ _ h1 h2
+          | write b =>
+            simp only [actOf, applyAct, Sum.elim_inr, SqrtLogSpace.headDisplacement]
+            exact span_write _ _ _ _ _ h1 h2
+        · have hne : (P.scan ⟨q, hq⟩).val ≠ i.val := fun h => hij (Fin.ext h).symm
+          simp only [List.getElem_set_ne hne, Function.update_of_ne hij]
+          exact hrel i (by simpa using hi)
 
 theorem rel_trace (P : Computation.PrimitiveMachine) (x : List Bool) (t : ℕ) (final : SqrtLogSpace.LocatedCfg P)
     (h : Computation.Trace (SqrtLogSpace.locatedStep P) t (SqrtLogSpace.locatedInit P x) final) :
