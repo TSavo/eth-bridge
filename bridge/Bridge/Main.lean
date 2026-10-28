@@ -375,9 +375,62 @@ theorem rel_init (P : Computation.PrimitiveMachine) (x : List Bool) :
     · rw [if_neg (fun h => hk (Fin.ext h)), if_neg hk]
       simp
 
+theorem monitor_config (P : Computation.PrimitiveMachine) (lc : SqrtLogSpace.LocatedCfg P) (cfg : P.Cfg) :
+    (lc.monitor cfg).config = cfg := by
+  unfold SqrtLogSpace.LocatedCfg.monitor
+  cases lc.config.state with
+  | inl _ => rfl
+  | inr q =>
+    simp only [Sum.elim_inr]
+    cases P.transition q (lc.config.tapes (P.scan q)).head with
+    | inl _ => rfl
+    | inr _ => rfl
+
+/-- What `toCfg P (st, tapes) = some c` says. -/
+theorem toCfg_eq_some (P : Computation.PrimitiveMachine) (st : Bool ⊕ ℕ) (tapes : List TapeRep) (c : P.Cfg)
+    (h : toCfg P (st, tapes) = some c) :
+    ∃ hlen : tapes.length = P.tapeCount,
+      c.tapes = (fun i => (tapes[i.val]'(by rw [hlen]; exact i.isLt)).toTape) ∧
+      ((∃ b, st = .inl b ∧ c.state = .inl b) ∨
+        (∃ (q : ℕ) (hq : q < P.stateCount), st = .inr q ∧ c.state = .inr ⟨q, hq⟩)) := by
+  unfold toCfg at h
+  simp only at h
+  split_ifs at h with hlen
+  refine ⟨hlen, ?_⟩
+  cases st with
+  | inl b =>
+    simp only [Option.some.injEq] at h
+    subst h
+    exact ⟨rfl, Or.inl ⟨b, rfl, rfl⟩⟩
+  | inr q =>
+    simp only at h
+    split_ifs at h with hq
+    simp only [Option.some.injEq] at h
+    subst h
+    exact ⟨rfl, Or.inr ⟨q, hq, rfl, rfl⟩⟩
+
+theorem stepRep_length (P : Computation.PrimitiveMachine) (r : CfgRep) (c : P.Cfg) (hcfg : toCfg P r = some c) :
+    (stepRep P r).2.length = r.2.length := by
+  obtain ⟨st, tapes⟩ := r
+  obtain ⟨hlen, -, hst⟩ := toCfg_eq_some P st tapes c hcfg
+  rcases hst with ⟨b, rfl, -⟩ | ⟨q, hq, rfl, -⟩
+  · rfl
+  · have hscan : (P.scan ⟨q, hq⟩).val < tapes.length := by rw [hlen]; exact (P.scan ⟨q, hq⟩).isLt
+    simp only [stepRep, Sum.elim_inr, scanTable_getD P ⟨q, hq⟩]
+    cases ((table P).getD q []).getD _ (Sum.inl false) with
+    | inl _ => rfl
+    | inr p => simp only [Sum.elim_inr, setAt_eq_set _ _ _ hscan, List.length_set]
+
 theorem rel_step (P : Computation.PrimitiveMachine) (r : CfgRep) (lc lc' : SqrtLogSpace.LocatedCfg P)
     (h : Rel P r lc) (hs : SqrtLogSpace.locatedStep P lc = some lc') : Rel P (stepRep P r) lc' := by
-  sorry
+  obtain ⟨hcfg, hlen, hrel⟩ := h
+  unfold SqrtLogSpace.locatedStep at hs
+  obtain ⟨cfg', hstep, rfl⟩ := Option.map_eq_some_iff.1 hs
+  refine ⟨?_, ?_, ?_⟩
+  · rw [stepRep_sound P r lc.config hcfg, hstep, monitor_config]
+    rfl
+  · rw [stepRep_length P r lc.config hcfg, hlen]
+  · sorry
 
 theorem rel_trace (P : Computation.PrimitiveMachine) (x : List Bool) (t : ℕ) (final : SqrtLogSpace.LocatedCfg P)
     (h : Computation.Trace (SqrtLogSpace.locatedStep P) t (SqrtLogSpace.locatedInit P x) final) :
