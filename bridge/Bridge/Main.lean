@@ -215,9 +215,8 @@ theorem stepRep_polyT (P : Computation.PrimitiveMachine) : PolyT (stepRep P) := 
 
 /-- The input representation: the word on the input tape, head on its first cell, other tapes blank. -/
 def initRep (P : Computation.PrimitiveMachine) (x : List Bool) : CfgRep :=
-  (.inr P.start.val,
-    List.replicate P.inputTape.val ([], none, []) ++
-      ([], x.head?, (x.drop 1).map some) :: List.replicate (P.tapeCount - P.inputTape.val - 1) ([], none, []))
+  (.inr P.start.val, (List.range P.tapeCount).map fun i =>
+    if i = P.inputTape.val then ([], x.head?, (x.drop 1).map some) else ([], none, []))
 
 /-- The output: the halting bit, once halted. -/
 def outRep (r : CfgRep) : Option Bool := r.1.elim (fun b => some b) fun _ => none
@@ -347,9 +346,34 @@ theorem toTape_input (x : List Bool) :
   | nil => simp [TapeRep.toTape, Tape.mk₁, Tape.mk₂, ListBlank.mk_singleton_none]
   | cons b x => simp [TapeRep.toTape, Tape.mk₁, Tape.mk₂]
 
+theorem initRep_length (P : Computation.PrimitiveMachine) (x : List Bool) :
+    (initRep P x).2.length = P.tapeCount := by
+  simp [initRep]
+
+theorem initRep_getElem (P : Computation.PrimitiveMachine) (x : List Bool) (i : ℕ) (hi : i < (initRep P x).2.length) :
+    (initRep P x).2[i] = if i = P.inputTape.val then ([], x.head?, (x.drop 1).map some) else ([], none, []) := by
+  simp [initRep]
+
 theorem rel_init (P : Computation.PrimitiveMachine) (x : List Bool) :
     Rel P (initRep P x) (SqrtLogSpace.locatedInit P x) := by
-  sorry
+  have hlen := initRep_length P x
+  refine ⟨?_, hlen, fun i hi => ?_⟩
+  · unfold toCfg
+    rw [dif_pos hlen]
+    simp only [initRep, dif_pos P.start.isLt, Option.some.injEq, SqrtLogSpace.locatedInit,
+      Computation.PrimitiveMachine.init, Computation.PrimitiveMachine.Cfg.mk.injEq, true_and]
+    funext k
+    rw [List.getElem_map, List.getElem_range]
+    by_cases hk : k = P.inputTape
+    · subst hk; rw [if_pos rfl, if_pos rfl, toTape_input]
+    · rw [if_neg (fun h => hk (Fin.ext h)), if_neg hk, toTape_blank]
+  · rw [initRep_getElem]
+    simp only [SqrtLogSpace.locatedInit]
+    by_cases hk : i = P.inputTape
+    · subst hk
+      simp
+    · rw [if_neg (fun h => hk (Fin.ext h)), if_neg hk]
+      simp
 
 theorem rel_step (P : Computation.PrimitiveMachine) (r : CfgRep) (lc lc' : SqrtLogSpace.LocatedCfg P)
     (h : Rel P r lc) (hs : SqrtLogSpace.locatedStep P lc = some lc') : Rel P (stepRep P r) lc' := by
@@ -370,10 +394,96 @@ theorem rel_trace (P : Computation.PrimitiveMachine) (x : List Bool) (t : ℕ) (
     exact ih _ (rel_step P r _ _ hr hab)
 
 /-- The size of a representation, from the lengths of its lists. -/
+theorem size_optionBool_le (c : Option Bool) : size c ≤ 2 := by
+  cases c <;> simp [HasSize.size]
+
+theorem size_listOptionBool_le (L : List (Option Bool)) : size L ≤ 3 * L.length + 1 := by
+  simp only [HasSize.size]
+  induction L with
+  | nil => simp
+  | cons c L ih =>
+    have := size_optionBool_le c
+    simp only [List.map_cons, List.sum_cons, List.length_cons] at *
+    simp only [HasSize.size] at this ih ⊢
+    omega
+
+theorem size_tapeRep_le (t : TapeRep) : size t ≤ 3 * (t.1.length + t.2.2.length) + 4 := by
+  obtain ⟨L, h, R⟩ := t
+  have h1 := size_listOptionBool_le L
+  have h2 := size_listOptionBool_le R
+  have h3 := size_optionBool_le h
+  simp only [HasSize.size] at *
+  omega
+
+theorem size_state_le (P : Computation.PrimitiveMachine) (st : Bool ⊕ ℕ) (hst : ∀ q, st = .inr q → q < P.stateCount) :
+    size st ≤ P.stateCount + 2 := by
+  cases st with
+  | inl b => simp [HasSize.size]
+  | inr q =>
+    have hq := hst q rfl
+    have : q.size ≤ q := Nat.size_le.2 (Nat.lt_two_pow_self)
+    simp only [HasSize.size]
+    omega
+
+/-- A list sum bounded index by index is bounded by a range sum. -/
+theorem list_sum_map_le_sum_range {α : Type} (l : List α) (f : α → ℕ) (g : ℕ → ℕ)
+    (h : ∀ i (hi : i < l.length), f l[i] ≤ g i) :
+    (l.map f).sum ≤ ∑ i ∈ Finset.range l.length, g i := by
+  induction l generalizing g with
+  | nil => simp
+  | cons a l ih =>
+    simp only [List.map_cons, List.sum_cons, List.length_cons, Finset.sum_range_succ']
+    have h0 := h 0 (by simp)
+    have := ih (fun i => g (i + 1)) fun i hi => h (i + 1) (by simpa using hi)
+    simp only [List.getElem_cons_zero] at h0
+    omega
+
 theorem size_of_rel (P : Computation.PrimitiveMachine) (r : CfgRep) (lc : SqrtLogSpace.LocatedCfg P)
     (h : Rel P r lc) :
     size r ≤ 8 * (SqrtLogSpace.visitedSpace lc + P.tapeCount + P.stateCount + 1) := by
-  sorry
+  obtain ⟨hcfg, hlen, hrel⟩ := h
+  obtain ⟨st, tapes⟩ := r
+  simp only at hlen hrel
+  have hst : size st ≤ P.stateCount + 2 := by
+    refine size_state_le P st fun q hq => ?_
+    subst hq
+    unfold toCfg at hcfg
+    simp only at hcfg
+    rw [dif_pos hlen] at hcfg
+    by_contra hlt
+    rw [dif_neg hlt] at hcfg
+    simp at hcfg
+  -- per tape: 3 (|L| + |R|) + 5 ≤ 3 (upper − lower + 1).toNat + 5, and |L| + |R| = upper − lower
+  let g : ℕ → ℕ := fun i => if hi : i < P.tapeCount then
+    3 * (lc.upper ⟨i, hi⟩ - lc.lower ⟨i, hi⟩ + 1).toNat + 5 else 0
+  have hper : ∀ i (hi : i < tapes.length), size tapes[i] + 1 ≤ g i := by
+    intro i hi
+    have hi' : i < P.tapeCount := hlen ▸ hi
+    obtain ⟨h1, h2⟩ := hrel ⟨i, hi'⟩ hi
+    have hsz := size_tapeRep_le tapes[i]
+    simp only [g, dif_pos hi']
+    have hspan : (tapes[i].1.length : ℤ) + tapes[i].2.2.length ≤ ((lc.upper ⟨i, hi'⟩ - lc.lower ⟨i, hi'⟩ + 1).toNat : ℤ) := by
+      have h1' : (tapes[i].1.length : ℤ) = lc.position ⟨i, hi'⟩ - lc.lower ⟨i, hi'⟩ := h1
+      have h2' : (tapes[i].2.2.length : ℤ) = lc.upper ⟨i, hi'⟩ - lc.position ⟨i, hi'⟩ := h2
+      rw [h1', h2']
+      have := Int.self_le_toNat (lc.upper ⟨i, hi'⟩ - lc.lower ⟨i, hi'⟩ + 1)
+      omega
+    have hspan' : tapes[i].1.length + tapes[i].2.2.length ≤ (lc.upper ⟨i, hi'⟩ - lc.lower ⟨i, hi'⟩ + 1).toNat := by
+      exact_mod_cast hspan
+    omega
+  have hsum := list_sum_map_le_sum_range tapes (fun t => size t + 1) g hper
+  have hvis : ∑ i ∈ Finset.range tapes.length, g i =
+      3 * SqrtLogSpace.visitedSpace lc + 5 * P.tapeCount := by
+    rw [hlen, ← Fin.sum_univ_eq_sum_range g P.tapeCount]
+    simp only [SqrtLogSpace.visitedSpace, g, Fin.is_lt, dite_true, Fin.eta, Finset.mul_sum,
+      Finset.sum_add_distrib, Finset.sum_const, Finset.card_univ, Fintype.card_fin, smul_eq_mul]
+    ring
+  have htapes : size tapes ≤ 3 * SqrtLogSpace.visitedSpace lc + 5 * P.tapeCount + 1 := by
+    simp only [HasSize.size]
+    simp only [HasSize.size] at hsum
+    omega
+  simp only [HasSize.size] at hst htapes ⊢
+  omega
 
 /-- The size of a reachable representation is bounded by the visited space of the run. -/
 theorem size_le_visitedSpace (P : Computation.PrimitiveMachine) (x : List Bool) (t : ℕ)
