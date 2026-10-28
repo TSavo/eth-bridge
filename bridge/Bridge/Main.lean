@@ -29,6 +29,8 @@ import ToTuring.Lib.List3
 import ToTuring.Lib.Table
 import ToTuring.Lib.Unary
 import Bridge.OpenAIStatement
+import Bridge.BitLength
+import Bridge.FrontEnd
 
 open OAI.Algorithms.SubexponentialSAT Turing Groundwork
 open scoped NNReal
@@ -68,10 +70,10 @@ theorem runtimeScale_sublinear (δ : ℝ) (hδ : 0 < δ) :
 
 /-! ## 2. The OpenAI input word has length polynomial in n for width-k formulas. -/
 
-theorem formulaBitLength_poly (k : ℕ) :
+theorem formulaBitLength_poly' (k : ℕ) :
     ∃ c : ℕ, ∀ (n : ℕ) (F : SAT.CNF (Fin n)), SAT.WidthAtMost k F →
-      Encoding.formulaBitLength F ≤ c * (n + 1) ^ (k + 2) := by
-  sorry
+      Encoding.formulaBitLength F ≤ c * (n + 1) ^ (k + 2) :=
+  Bridge.formulaBitLength_poly k
 
 /-! ## 3. The front end: Anthropic's plain code ↦ OpenAI's canonical code. -/
 
@@ -112,7 +114,8 @@ theorem satisfiable_iff_count_pos {n : ℕ} (φ : Sat3.CNF n) :
 /-- A polynomial-time `pre` that maps every plain code of a 3-CNF to OpenAI's code of the same formula. -/
 theorem frontEnd_exists : ∃ pre : List Bool → List Bool, PolyT pre ∧
     ∀ (n : ℕ) (φ : Sat3.CNF n), Sat3.Is3CNF φ → pre (Sat3.enc φ) = Encoding.encodeCNF (toFinsetCNF φ) := by
-  sorry
+  obtain ⟨pre, hp, hs⟩ := frontEnd_exists'
+  exact ⟨pre, hp, fun n φ h => hs n φ h⟩
 
 /-! ## 4. OpenAI's primitive machine as a stepped computation.
 
@@ -908,7 +911,7 @@ theorem time_bound_real (c' d cL : ℕ) (C A : ℝ) (hC : 0 < C) (hA : 0 < A) (n
 theorem subexpTM_of_claimAt3 (h : SqrtLogSpace.ClaimAt 3) : Sat3.SubexpTM := by
   obtain ⟨P, countTape, answerTape, C, A, S, d, e, hC, hA, hS, hd, he, hrun⟩ := h
   obtain ⟨pre, hpre, hspec⟩ := frontEnd_exists
-  obtain ⟨cL, hcL⟩ := formulaBitLength_poly 3
+  obtain ⟨cL, hcL⟩ := formulaBitLength_poly' 3
   haveI hP : IsPolyT (stepped P pre) := isPolyT_stepped P pre hpre
   obtain ⟨d', hd'⟩ := exists_pow_bound (8 * ⌈S⌉₊ * (cL + 1) ^ e + 5 * e) (8 * (P.tapeCount + P.stateCount + 1))
   obtain ⟨N, c', hfin, hN⟩ := Groundwork.exists_tm (stepped P pre) d'
