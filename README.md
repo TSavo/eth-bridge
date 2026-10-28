@@ -3,6 +3,12 @@
 Two labs published machine-checked refutations of the Exponential Time Hypothesis on 2026-10-26, on
 different machine models with different formal statements. This library joins them on one statement.
 
+**The one file to read:** Anthropic's trusted statement
+[`eth/MainResults.lean`](https://github.com/anthropics/formal-math/blob/main/eth/MainResults.lean)
+(150 lines, imports only Mathlib, defines `ETH` and `ETHIsFalse`). OpenAI's trusted statement is
+[`bridge/Bridge/OpenAIStatement.lean`](bridge/Bridge/OpenAIStatement.lean), their comparator file verbatim.
+The bridge theorem's challenge file is [`bridge/BridgeChallenge.lean`](bridge/BridgeChallenge.lean).
+
 - `Bridge.ethIsFalse_of_claim : OAI.Algorithms.SubexponentialSAT.SqrtLogSpace.Claim → MainResults.ETHIsFalse`
 - `Bridge.two_proofs_one_statement : MainResults.ETHIsFalse ∧ (Claim → MainResults.ETHIsFalse)`
   (Anthropic's proof beside the bridge from OpenAI's claim)
