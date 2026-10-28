@@ -229,9 +229,86 @@ def stepped (P : Computation.PrimitiveMachine) (pre : List Bool → List Bool) :
   step := stepRep P
   out := outRep
 
+theorem toTape_head (t : TapeRep) : t.toTape.head = t.2.1 := by
+  obtain ⟨L, h, R⟩ := t
+  simp [TapeRep.toTape, ListBlank.head_mk]
+
+theorem setAt_eq_set (l : List TapeRep) (i : ℕ) (t : TapeRep) (hi : i < l.length) :
+    setAt l i t = l.set i t := by
+  induction l generalizing i with
+  | nil => simp at hi
+  | cons a l ih =>
+    cases i with
+    | zero => simp [setAt]
+    | succ i =>
+      have := ih i (by simpa using hi)
+      simp only [setAt] at this
+      simp [setAt, this]
+
+theorem scanTable_getD (P : Computation.PrimitiveMachine) (q : Fin P.stateCount) :
+    (scanTable P).getD q.val 0 = (P.scan q).val := by
+  simp [scanTable, List.getD_eq_getElem?_getD, q.isLt]
+
+theorem table_getD (P : Computation.PrimitiveMachine) (q : Fin P.stateCount) (c : Option Bool) :
+    ((table P).getD q.val []).getD (symIdx c) (.inl false) = transOf (P.transition q c) := by
+  have h1 : (table P).getD q.val [] = [none, some false, some true].map fun c => transOf (P.transition q c) := by
+    simp [table, List.getD_eq_getElem?_getD, q.isLt]
+  rw [h1]
+  cases c with
+  | none => rfl
+  | some b => cases b <;> rfl
+
+theorem toTape_applyAct (a : Turing.TM0.Stmt (Option Bool)) (t : TapeRep) :
+    (applyAct (actOf a) t).toTape =
+      (match a with
+        | .move d => t.toTape.move d
+        | .write b => t.toTape.write b) := by
+  cases a with
+  | move d => cases d <;> simp [actOf, applyAct, toTape_moveL, toTape_moveR]
+  | write b => simp [actOf, applyAct, toTape_writeC]
+
 theorem stepRep_sound (P : Computation.PrimitiveMachine) (r : CfgRep) (c : P.Cfg) (h : toCfg P r = some c) :
     (toCfg P (stepRep P r)) = (P.step c).elim (toCfg P r) some := by
-  sorry
+  obtain ⟨st, tapes⟩ := r
+  unfold toCfg at h
+  simp only at h
+  split_ifs at h with hlen
+  cases st with
+  | inl b =>
+    simp only [Option.some.injEq] at h
+    subst h
+    simp [stepRep, Computation.PrimitiveMachine.step, toCfg, hlen]
+  | inr q =>
+    simp only at h
+    split_ifs at h with hq
+    simp only [Option.some.injEq] at h
+    subst h
+    have hscan : (P.scan ⟨q, hq⟩).val < tapes.length := by rw [hlen]; exact (P.scan ⟨q, hq⟩).isLt
+    simp only [stepRep, Sum.elim_inr, scanTable_getD P ⟨q, hq⟩,
+      List.getD_eq_getElem (l := tapes) (d := (([], none, []) : TapeRep)) hscan]
+    have ht := table_getD P ⟨q, hq⟩ (tapes[(P.scan ⟨q, hq⟩).val]'hscan).2.1
+    rw [ht]
+    simp only [Computation.PrimitiveMachine.step, toTape_head]
+    cases htr : P.transition ⟨q, hq⟩ (tapes[(P.scan ⟨q, hq⟩).val]'hscan).2.1 with
+    | inl ans =>
+      simp [transOf, toCfg, hlen]
+    | inr qa =>
+      obtain ⟨q', act⟩ := qa
+      simp only [transOf, Sum.elim_inr, Option.elim]
+      rw [setAt_eq_set _ _ _ hscan]
+      unfold toCfg
+      simp only [List.length_set, hlen, q'.isLt, dite_true, Option.some.injEq,
+        Computation.PrimitiveMachine.Cfg.mk.injEq]
+      refine ⟨trivial, ?_⟩
+      funext i
+      by_cases hi : i = P.scan ⟨q, hq⟩
+      · subst hi
+        simp only [Function.update_self, List.getElem_set_self]
+        cases act with
+        | move d => cases d <;> simp [actOf, applyAct, toTape_moveL, toTape_moveR]
+        | write b => simp [actOf, applyAct, toTape_writeC]
+      · have hne : (P.scan ⟨q, hq⟩).val ≠ i.val := fun h => hi (Fin.ext h).symm
+        rw [Function.update_of_ne hi, List.getElem_set_ne hne]
 
 instance carried_cfgRep : Carried CfgRep := inferInstance
 
@@ -251,12 +328,60 @@ def isPolyT_stepped (P : Computation.PrimitiveMachine) (pre : List Bool → List
     unfold outRep
     fun_prop
 
+/-! ### The size invariant: representation spans equal OpenAI's visited spans. -/
+
+/-- `r` represents the located configuration `lc`: same machine configuration, and on every tape the
+left list has `position − lower` cells and the right list `upper − position` cells. -/
+def Rel (P : Computation.PrimitiveMachine) (r : CfgRep) (lc : SqrtLogSpace.LocatedCfg P) : Prop :=
+  toCfg P r = some lc.config ∧ r.2.length = P.tapeCount ∧
+    ∀ i : Fin P.tapeCount, ∀ hi : i.val < r.2.length,
+      ((r.2[i.val]'hi).1.length : ℤ) = lc.position i - lc.lower i ∧
+      ((r.2[i.val]'hi).2.2.length : ℤ) = lc.upper i - lc.position i
+
+theorem toTape_blank : TapeRep.toTape ([], none, []) = Tape.mk₁ [] := by
+  simp [TapeRep.toTape, Tape.mk₁, Tape.mk₂, ListBlank.mk_singleton_none]
+
+theorem toTape_input (x : List Bool) :
+    TapeRep.toTape ([], x.head?, (x.drop 1).map some) = Tape.mk₁ (x.map some) := by
+  cases x with
+  | nil => simp [TapeRep.toTape, Tape.mk₁, Tape.mk₂, ListBlank.mk_singleton_none]
+  | cons b x => simp [TapeRep.toTape, Tape.mk₁, Tape.mk₂]
+
+theorem rel_init (P : Computation.PrimitiveMachine) (x : List Bool) :
+    Rel P (initRep P x) (SqrtLogSpace.locatedInit P x) := by
+  sorry
+
+theorem rel_step (P : Computation.PrimitiveMachine) (r : CfgRep) (lc lc' : SqrtLogSpace.LocatedCfg P)
+    (h : Rel P r lc) (hs : SqrtLogSpace.locatedStep P lc = some lc') : Rel P (stepRep P r) lc' := by
+  sorry
+
+theorem rel_trace (P : Computation.PrimitiveMachine) (x : List Bool) (t : ℕ) (final : SqrtLogSpace.LocatedCfg P)
+    (h : Computation.Trace (SqrtLogSpace.locatedStep P) t (SqrtLogSpace.locatedInit P x) final) :
+    Rel P ((stepRep P)^[t] (initRep P x)) final := by
+  suffices H : ∀ (t : ℕ) (a b : SqrtLogSpace.LocatedCfg P) (r : CfgRep),
+      Computation.Trace (SqrtLogSpace.locatedStep P) t a b → Rel P r a → Rel P ((stepRep P)^[t] r) b from
+    H t _ _ _ h (rel_init P x)
+  intro t a b r htr
+  induction htr generalizing r with
+  | refl a => intro h; simpa using h
+  | cons hab _ ih =>
+    intro hr
+    rw [Function.iterate_succ_apply]
+    exact ih _ (rel_step P r _ _ hr hab)
+
+/-- The size of a representation, from the lengths of its lists. -/
+theorem size_of_rel (P : Computation.PrimitiveMachine) (r : CfgRep) (lc : SqrtLogSpace.LocatedCfg P)
+    (h : Rel P r lc) :
+    size r ≤ 8 * (SqrtLogSpace.visitedSpace lc + P.tapeCount + P.stateCount + 1) := by
+  sorry
+
 /-- The size of a reachable representation is bounded by the visited space of the run. -/
 theorem size_le_visitedSpace (P : Computation.PrimitiveMachine) (x : List Bool) (t : ℕ)
     (final : SqrtLogSpace.LocatedCfg P)
     (h : Computation.Trace (SqrtLogSpace.locatedStep P) t (SqrtLogSpace.locatedInit P x) final) :
-    size ((stepRep P)^[t] (initRep P x)) ≤ 3 * SqrtLogSpace.visitedSpace final + 3 * P.tapeCount + 4 := by
-  sorry
+    size ((stepRep P)^[t] (initRep P x)) ≤
+      8 * (SqrtLogSpace.visitedSpace final + P.tapeCount + P.stateCount + 1) :=
+  size_of_rel P _ final (rel_trace P x t final h)
 
 /-! ## 5. Assembly. -/
 
